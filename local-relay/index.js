@@ -1,5 +1,21 @@
 
-import { createInterface } from "readline";
+/**
+ * This script listens to a serial port for a json-encoded object.
+ * Once recieved, the object is sent to a Firebase Real-time database (RTDB)
+ * 
+ * USAGE : connect an arduino with pv-tracking* running on /dev/ttyACM0
+ * (*) https://github.com/psabaty/arduino-pv-tracking
+ * 
+ * DEBUG :
+ * use "socat" to simulate arduino messages :
+ *   socat -d -d pty,raw,echo=0 pty,raw,echo=0
+ * then run this script with first port (/dev/pts/4)
+ * and send it messages with the second port
+ *   echo '{"Pi":80,"Pac":1000,"k":20}' > /dev/pts/5
+ */
+
+import {SerialPort} from 'serialport';
+import { ReadlineParser } from '@serialport/parser-readline'
 
 // /!\ ATTENTION /compat/ for using v9 this way (for auth)
 import firebase from 'firebase/compat/app';
@@ -30,43 +46,32 @@ const firebaseConfig = {
 };
 
 const app = firebase.initializeApp(firebaseConfig);
-/*
-firebase.auth().signInWithEmailAndPassword('phil@psabaty.work','lalalilala35140;')
-.then((res) => console.log('then '+JSON.stringify(res)))
-.catch((err) => console.log('then '+err.message))
-.finally(() => console.log('finally!'))
-*/
 const { user } = await firebase.auth().signInWithEmailAndPassword('phil@psabaty.work','lalalilala35140;');
 const firebaseDbPath = 'UsersData/' + user.uid + '/pvTracks'
 const firebaseDbRef = firebase.database().ref(firebaseDbPath)
 console.log('firebaseDbPath = '+firebaseDbPath);
 
+const serialPortPath = '/dev/ttyACM0';
+//const serialPortPath = '/dev/pts/4';
 
-const readline = createInterface({
-    input: process.stdin,
-    output: process.stdout
+const port = new SerialPort({path: serialPortPath,  baudRate: 9600 });
+const parser = port.pipe(new ReadlineParser({ delimiter: '\n' }));// Read the port data
+port.on("open", () => {
+  console.log('serial port open');
+});
+parser.on('data', data =>{
+    if('' != data) {sendToFirebase(data);}
+  //console.log('got word from serial : ', data);
 });
 
-const readLineAsync = msg => {
-    return new Promise(resolve => {
-        readline.question(msg, userRes => {
-            resolve(userRes);
-        });
-    });
-}
-
-const startApp = async () => {
-    let input = ''
-    do{
-        input = await readLineAsync("?> ");
-        if('' != input) {sendToFirebase(input);}
-    }while('' != input)
-
-    readline.close();
+process.on('SIGINT', function() {
+    console.log("Closing Firebase connections");
     firebase.database().goOffline();
     firebase.auth().signOut();
     app.delete();
-}
+
+    process.exit();
+});
 
 /**
  * Object in json will be stored at firebaseDbPath[ timestamp ]
@@ -98,4 +103,4 @@ const sendToFirebase = jsonStringFromTracker => {
     }
 }
 
-startApp();
+//startApp();
