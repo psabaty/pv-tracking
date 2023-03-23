@@ -94,3 +94,10 @@ hr {
     clear: both;
     display: table;
 }
+
+/* -------------------------- */
+#buttonPreviousDay, #buttonNextDay{
+    cursor: pointer;
+    color: #049faa;
+    padding: 0 1em;
+}

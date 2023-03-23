@@ -1,3 +1,7 @@
+// Globals
+var activeDayDate = new Date();
+var isTodayTheActiveDay = true;
+
 
 // convert time to human-readable format YYYY/MM/DD HH:MM:SS
 function epochToDateTime(epochTime){
@@ -21,16 +25,14 @@ function epochToDate(epochTime){
 function epochToTime(epochTime){
   return epochToDateTime(epochTime).substring(11);
 }
+function getDaySignature(date){
+  return date.getFullYear() + "-" + (date.getMonth() + 1) + "-" + date.getDate();
+}
 
-// give current day (or forced GET param) as YYYY-(M)M-(D)D
-function getDaySignature(){
-  const urlParams = new URLSearchParams(window.location.search);
-  if(urlParams.has('d')){
-    return urlParams.get('d');
-  }else{
-    var today = new Date();
-    return today.getFullYear() + "-" + (today.getMonth() + 1) + "-" + today.getDate();
-  }
+function shiftActiveDay(daysOffset){
+  activeDayDate.setDate(activeDayDate.getDate() + daysOffset);
+  updateIsTodayTheActiveDay();
+  loadTracksForActiveDay();
 }
 
 // DOM elements
@@ -47,9 +49,24 @@ const consigneElement = document.getElementById("consigne");
 const autoconsoElement = document.getElementById("autoconso");
 const updateElement = document.getElementById("lastUpdate");
 
+const buttonPreviousDay = document.getElementById("buttonPreviousDay");
+const buttonNextDay = document.getElementById("buttonNextDay");
+
+buttonPreviousDay.addEventListener('click', (e) => {
+  shiftActiveDay(-1);
+  e.preventDefault();
+  return false;
+});
+buttonNextDay.addEventListener('click', (e) => {
+  shiftActiveDay(1);
+  e.preventDefault();
+  return false;
+});
+
+
 // MANAGE LOGIN/LOGOUT UI
-const setupUI = (user) => {
-  if ( !user ) {
+const setupUI = () => {
+  if ( firebaseUser == null ) {
     // toggle UI elements (user logged out)
     loginElement.style.display = 'block';
     authBarElement.style.display ='none';
@@ -62,21 +79,68 @@ const setupUI = (user) => {
     contentElement.style.display = 'block';
     authBarElement.style.display ='block';
     userDetailsElement.style.display ='block';
-    userDetailsElement.innerHTML = user.email;
+    userDetailsElement.innerHTML = firebaseUser.email;
 
-    // Database paths (with user UID)
-    var uid = user.uid;
-    var daySignature = getDaySignature();
-    var dbPath = 'UsersData/' + uid.toString() + '/pvTracks/' + daySignature;
-    var chartPath = 'UsersData/' + uid.toString() + '/charts/range';
+    initiateActiveDay();
+    updateIsTodayTheActiveDay();
 
-    // Database references
+    loadTracksForActiveDay();
+    loadRealtimeTracks();
+    
+  }
+}
+
+function updateIsTodayTheActiveDay(){
+  isTodayTheActiveDay = (getDaySignature(activeDayDate)==getDaySignature(new Date()));
+  buttonNextDay.style.visibility = isTodayTheActiveDay ? 'hidden':'visible';
+}
+
+function initiateActiveDay(){
+  activeDayDate = new Date()
+  const urlParams = new URLSearchParams(window.location.search);
+  if(urlParams.has('d')){
+    queryDaySignature = urlParams.get('d');
+    queryDaySignatureElements = queryDaySignature.split('-');
+    activeDayDate.setFullYear(queryDaySignatureElements[0]);
+    activeDayDate.setMonth(queryDaySignatureElements[1] - 1);
+    activeDayDate.setDate(queryDaySignatureElements[2]);
+    activeDayDate.setHours(12);
+  }
+}
+function loadRealtimeTracks(){
+
+  var daySignature = getDaySignature(new Date());
+  var dbPath = 'UsersData/' + firebaseUser.uid.toString() + '/pvTracks/' + daySignature;
+  var dbRef = firebase.database().ref(dbPath);
+
+  // Get the latest readings and display on cards
+  dbRef.orderByKey().limitToLast(1).on('child_added', snapshot =>{
+    var jsonData = snapshot.toJSON(); // example: {injection: 25.02, consigne: 50.20, autoconso: 1008.48, timestamp:1641317355}
+    
+    // Update top info
+    updateElement.innerHTML = epochToDateTime(jsonData.timestamp);
+
+    // Update cards
+    injectionElement.innerHTML = jsonData.Pi;
+    consigneElement.innerHTML = jsonData.k;
+    autoconsoElement.innerHTML = jsonData.Pac;
+    
+  });
+}
+
+function loadTracksForActiveDay(){
+    var daySignature = getDaySignature(activeDayDate);
+    var dbPath = 'UsersData/' + firebaseUser.uid.toString() + '/pvTracks/' + daySignature;
     var dbRef = firebase.database().ref(dbPath);
 
     // CHARTS    
     var chartRange = 288; // 288 = 1day / 5 minutes
-    if(chartG != undefined){chartG.destroy();}
-    chartG = createGeneralChart();
+    if(chartG != undefined){
+      chartG.series.forEach(s => {s.setData([]);}); 
+    }else{
+      chartG = createGeneralChart();
+    }
+    
     
     /*
     dbRef.orderByKey().limitToLast(chartRange).on('child_added', snapshot =>{
@@ -87,12 +151,13 @@ const setupUI = (user) => {
     });
     */
     dbRef.orderByKey().limitToLast(chartRange).once('value', snapshots =>{
-      var count = 0;
       var Ei = 0;
       var Eac = 0;
       var chartTitle = null;
-      snapshots.forEach((snapshot, index) => {
-        var jsonData = snapshot.toJSON(); // example: {Pi: 25.02, k: 50.20, Pac: 1008.48, timestamp:1641317355}
+      var lastTimestamp = 0;
+      snapshots.forEach((snapshot) => {
+        var jsonData = snapshot.toJSON(); 
+        lastTimestamp = jsonData.timestamp;
         Ei  += jsonData.Ei;
         Eac += jsonData.Eac;
         var x = new Date(jsonData.timestamp*1000).getTime();
@@ -100,30 +165,20 @@ const setupUI = (user) => {
         chartG.series[1].addPoint([x, Math.round(jsonData.Pac)], false, false, false);
         chartG.series[2].addPoint([x, Math.round(Ei)], false, false, false);
         chartG.series[3].addPoint([x, Math.round(Eac)], false, false, false);
-        if(count==0){
+        if(chartTitle==null){
           chartTitle = epochToDate(jsonData.timestamp);
         }
-        count++;
-        
       });
       chartGeneralTitle.innerHTML = chartTitle;
       chartG.redraw();
+
+      if(isTodayTheActiveDay){
+        dbRef.orderByKey().startAfter(lastTimestamp).on('child_added', snapshot =>{
+          var jsonData = snapshot.toJSON(); 
+          var x = new Date(jsonData.timestamp*1000).getTime();
+          chartG.series[0].addPoint([x, Number(jsonData.Pi )], true, false, true);
+          chartG.series[1].addPoint([x, Number(jsonData.Pac)], true, false, true);
+        });
+      }
     });
-
-    // Get the latest readings and display on cards
-    dbRef.orderByKey().limitToLast(1).on('child_added', snapshot =>{
-      var jsonData = snapshot.toJSON(); // example: {injection: 25.02, consigne: 50.20, autoconso: 1008.48, timestamp:1641317355}
-      
-      // Update top info
-      updateElement.innerHTML = epochToDateTime(jsonData.timestamp);
-
-      // Update cards
-      injectionElement.innerHTML = jsonData.Pi;
-      consigneElement.innerHTML = jsonData.k;
-      autoconsoElement.innerHTML = jsonData.Pac;
-      
-    });
-
-  }
-
 }

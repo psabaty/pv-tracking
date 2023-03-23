@@ -1,14 +1,17 @@
+
+// global Firebase user
+var firebaseUser = null;
+
 document.addEventListener("DOMContentLoaded", function(){
     // listen for auth status changes
     auth.onAuthStateChanged(user => {
         if (user) {
-          console.log("user logged in");
-          //console.log(user);
-          setupUI(user);
-          var uid = user.uid;
-          console.log(uid);
+          firebaseUser = user;
+          console.log("user logged in. Uid = " + firebaseUser.uid);
+          setupUI();
         } else {
           console.log("user logged out");
+          firebaseUser = null;
           setupUI();
         }
     });
