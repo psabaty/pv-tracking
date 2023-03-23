@@ -1,0 +1,4 @@
+firebase init
+firebase init emulators
+firebase init hosting
+firebase emulators:start
