@@ -22,6 +22,7 @@ import { ReadlineParser } from '@serialport/parser-readline'
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth'
 import 'firebase/compat/database'
+import 'firebase/compat/firestore'
 
 import secretConfig from './secrets.js';
 
@@ -45,12 +46,10 @@ const firebaseConfig = {
     // source : https://stackoverflow.com/questions/37811684/how-to-create-credential-object-needed-by-firebase-web-user-reauthenticatewith
     // credential: firebase.auth.EmailAuthProvider.credential('user@ema.il','password')
 };
-var daySignature = createDaySignature();
 const app = firebase.initializeApp(firebaseConfig);
 const { user } = await firebase.auth().signInWithEmailAndPassword(secretConfig.user_email, secretConfig.user_password);
-const firebaseDbPath = 'UsersData/' + user.uid + '/pvTracks/' + daySignature;
-const firebaseDbRef = firebase.database().ref(firebaseDbPath);
-console.log('firebaseDbPath = '+firebaseDbPath);
+
+var firestore = null;
 
 // serial port
 if(process.argv[2] == undefined){
@@ -71,6 +70,9 @@ parser.on('data', data =>{
 process.on('SIGINT', function() {
     console.log("Closing Firebase connections");
     firebase.database().goOffline();
+    if(firestore!=null){
+        firestore.goOffline();
+    }
     firebase.auth().signOut();
     app.delete();
 
@@ -83,6 +85,11 @@ process.on('SIGINT', function() {
  * @param {"Pi":80,"Pac":1000,"k":20} jsonStringFromTracker 
  */
 const sendToFirebase = jsonStringFromTracker => {
+    var daySignature = createDaySignature();
+    var firebaseDbPath = 'UsersData/' + user.uid + '/pvTracks/' + daySignature;
+    var firebaseDbRef = firebase.database().ref(firebaseDbPath);
+    //console.log('firebaseDbPath = '+firebaseDbPath);
+
     try{   
         let jsonObject = JSON.parse(jsonStringFromTracker);
 
@@ -115,3 +122,19 @@ const createDaySignature = () => {
     return yyyy +'-'+ mm +'-'+ dd;
 
 }
+
+async function main(){
+    var firestore = firebase.firestore(app);
+
+    var timestamp = Math.round(Date.now()/1000).toString();
+    var daySignature = createDaySignature();
+    var firebaseDbPath = 'UsersData/' + user.uid + '/trackedDays/' + daySignature + '/pvRecords'
+
+    const usersDb = firestore.collection(firebaseDbPath); 
+    const liam = usersDb.doc(timestamp); 
+    await liam.set({"Pi":80,"Pac":1000,"k":20, "timestamp": timestamp});
+       console.log("main() : done.");
+
+}
+
+main();

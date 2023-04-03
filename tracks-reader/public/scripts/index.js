@@ -1,13 +1,13 @@
 // Globals
 var activeDayDate = new Date();
 var isTodayTheActiveDay = true;
+var lastTimestamp = 0;
+var timezoneOffsetInSeconds = (new Date().getTimezoneOffset())*60;
 
 
 // convert time to human-readable format YYYY/MM/DD HH:MM:SS
 function epochToDateTime(epochTime){
-  var timezoneOffsetInMinutes = new Date().getTimezoneOffset();
-  var tzTimestamp = parseInt(epochTime)+(timezoneOffsetInMinutes*60);
-  var epochDate = new Date(tzTimestamp*1000);
+  var epochDate = new Date(epochTime*1000);
   var dateTime = epochDate.getFullYear() + "/" +
     ("00" + (epochDate.getMonth() + 1)).slice(-2) + "/" +
     ("00" + epochDate.getDate()).slice(-2) + " " +
@@ -108,77 +108,73 @@ function initiateActiveDay(){
   }
 }
 function loadRealtimeTracks(){
+  var dbPath = 'UsersData/' + firebaseUser.uid.toString() + '/pvRecords';
+  var recordsCollection = firebase.firestore().collection(dbPath);
+  const realtimeQuery = recordsCollection.orderBy("timestamp", "desc")/*.startAfter(lastTimestamp)*/.limit(1);
+  realtimeQuery.onSnapshot(querySnapshot => {
+    querySnapshot.docChanges().forEach(change => {
+      if (change.type === 'added') {
 
-  var daySignature = getDaySignature(new Date());
-  var dbPath = 'UsersData/' + firebaseUser.uid.toString() + '/pvTracks/' + daySignature;
-  var dbRef = firebase.database().ref(dbPath);
+        var jsonData = change.doc.data();
 
-  // Get the latest readings and display on cards
-  dbRef.orderByKey().limitToLast(1).on('child_added', snapshot =>{
-    var jsonData = snapshot.toJSON(); // example: {injection: 25.02, consigne: 50.20, autoconso: 1008.48, timestamp:1641317355}
-    
-    // Update top info
-    updateElement.innerHTML = epochToDateTime(jsonData.timestamp);
+        // Update top info
+        updateElement.innerHTML = epochToDateTime(jsonData.timestamp);
 
-    // Update cards
-    injectionElement.innerHTML = jsonData.Pi;
-    consigneElement.innerHTML = jsonData.k;
-    autoconsoElement.innerHTML = jsonData.Pac;
-    
+        // Update cards
+        injectionElement.innerHTML = jsonData.Pi;
+        consigneElement.innerHTML = jsonData.k;
+        autoconsoElement.innerHTML = jsonData.Pac;
+        
+        if(isTodayTheActiveDay){
+          var x = new Date((jsonData.timestamp)*1000).getTime();
+          chartG.series[0].addPoint([x, Math.round(jsonData.Pi )], true, false, true);
+          chartG.series[1].addPoint([x, Math.round(jsonData.Pac)], true, false, true);
+        }
+      }
+    })
   });
 }
 
 function loadTracksForActiveDay(){
-    var daySignature = getDaySignature(activeDayDate);
-    var dbPath = 'UsersData/' + firebaseUser.uid.toString() + '/pvTracks/' + daySignature;
-    var dbRef = firebase.database().ref(dbPath);
 
-    // CHARTS    
-    var chartRange = 288; // 288 = 1day / 5 minutes
-    if(chartG != undefined){
-      chartG.series.forEach(s => {s.setData([]);}); 
-    }else{
-      chartG = createGeneralChart();
-    }
-    
-    
-    /*
-    dbRef.orderByKey().limitToLast(chartRange).on('child_added', snapshot =>{
-      var jsonData = snapshot.toJSON(); // example: {Pi: 25.02, k: 50.20, Pac: 1008.48, timestamp:1641317355}
-      var x = new Date(jsonData.timestamp*1000).getTime();
-      chartG.series[0].addPoint([x, Number(jsonData.Pi )], true, (chartG.series[0].data.length > 40), true);
-      chartG.series[1].addPoint([x, Number(jsonData.Pac)], true, (chartG.series[1].data.length > 40), true);
-    });
-    */
-    dbRef.orderByKey().limitToLast(chartRange).once('value', snapshots =>{
-      var Ei = 0;
-      var Eac = 0;
-      var chartTitle = null;
-      var lastTimestamp = 0;
-      snapshots.forEach((snapshot) => {
-        var jsonData = snapshot.toJSON(); 
+  var rangeMinDate = new Date(activeDayDate);
+  rangeMinDate.setHours(0, 0, 0, 0);
+  var rangeMinTs = Math.round(rangeMinDate.getTime()/1000);
+
+  var rangeMaxDate = new Date(activeDayDate);
+  rangeMaxDate.setHours(23, 59, 59);
+  var rangeMaxTs = Math.round(rangeMaxDate.getTime()/1000);
+  console.log("Querying between "+rangeMinDate+" and "+rangeMaxDate);
+  
+  if(chartG != undefined){
+    chartG.series.forEach(s => {s.setData([]);}); 
+  }else{
+    chartG = createGeneralChart();
+  }
+
+  //var dbRef = firebase.database().ref(dbPath);
+  var dbPath = 'UsersData/' + firebaseUser.uid.toString() + '/pvRecords';
+  var recordsCollection = firebase.firestore().collection(dbPath);
+  const query = recordsCollection.orderBy("timestamp", "asc").startAt(rangeMinTs).endAt(rangeMaxTs);
+  query.get().then(snapshot => {
+    var Ei = 0;
+    var Eac = 0;
+    snapshot.forEach(record => {
+        var jsonData = record.data();
         lastTimestamp = jsonData.timestamp;
         Ei  += jsonData.Ei;
         Eac += jsonData.Eac;
-        var x = new Date(jsonData.timestamp*1000).getTime();
+        var x = new Date((jsonData.timestamp)*1000).getTime();
         chartG.series[0].addPoint([x, Math.round(jsonData.Pi )], false, false, false);
         chartG.series[1].addPoint([x, Math.round(jsonData.Pac)], false, false, false);
         chartG.series[2].addPoint([x, Math.round(Ei)], false, false, false);
         chartG.series[3].addPoint([x, Math.round(Eac)], false, false, false);
-        if(chartTitle==null){
-          chartTitle = epochToDate(jsonData.timestamp);
-        }
       });
-      chartGeneralTitle.innerHTML = chartTitle;
+      chartGeneralTitle.innerHTML = epochToDate(lastTimestamp);
       chartG.redraw();
-
-      if(isTodayTheActiveDay){
-        dbRef.orderByKey().startAfter(lastTimestamp).on('child_added', snapshot =>{
-          var jsonData = snapshot.toJSON(); 
-          var x = new Date(jsonData.timestamp*1000).getTime();
-          chartG.series[0].addPoint([x, Number(jsonData.Pi )], true, false, true);
-          chartG.series[1].addPoint([x, Number(jsonData.Pac)], true, false, true);
-        });
-      }
-    });
+      
+  })
+  .catch(error => {
+    console.error(error);
+  });
 }
