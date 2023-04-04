@@ -7,7 +7,7 @@ var timezoneOffsetInSeconds = (new Date().getTimezoneOffset())*60;
 
 // convert time to human-readable format YYYY/MM/DD HH:MM:SS
 function epochToDateTime(epochTime){
-  var epochDate = new Date(epochTime*1000);
+  var epochDate = (epochTime!=null) ? new Date(epochTime*1000) : new Date();
   var dateTime = epochDate.getFullYear() + "/" +
     ("00" + (epochDate.getMonth() + 1)).slice(-2) + "/" +
     ("00" + epochDate.getDate()).slice(-2) + " " +
@@ -110,28 +110,22 @@ function initiateActiveDay(){
 function loadRealtimeTracks(){
   var dbPath = 'UsersData/' + firebaseUser.uid.toString() + '/pvRecords';
   var recordsCollection = firebase.firestore().collection(dbPath);
-  const realtimeQuery = recordsCollection.orderBy("timestamp", "desc")/*.startAfter(lastTimestamp)*/.limit(1);
-  realtimeQuery.onSnapshot(querySnapshot => {
-    querySnapshot.docChanges().forEach(change => {
-      if (change.type === 'added') {
+  //const realtimeQuery = recordsCollection.orderBy("timestamp", "desc")/*.startAfter(lastTimestamp)*/.limit(1);
+  //realtimeQuery.onSnapshot(querySnapshot => {
+  //  querySnapshot.docChanges().forEach(change => {
+  recordsCollection.doc("latest").onSnapshot((doc) => {
+    var jsonData = doc.data();
 
-        var jsonData = change.doc.data();
-
-        // Update top info
-        updateElement.innerHTML = epochToDateTime(jsonData.timestamp);
-
-        // Update cards
-        injectionElement.innerHTML = jsonData.Pi;
-        consigneElement.innerHTML = jsonData.k;
-        autoconsoElement.innerHTML = jsonData.Pac;
-        
-        if(isTodayTheActiveDay){
-          var x = new Date((jsonData.timestamp)*1000).getTime();
-          chartG.series[0].addPoint([x, Math.round(jsonData.Pi )], true, false, true);
-          chartG.series[1].addPoint([x, Math.round(jsonData.Pac)], true, false, true);
-        }
-      }
-    })
+    updateElement.innerHTML = epochToDateTime(null);
+    injectionElement.innerHTML = jsonData.Pi;
+    consigneElement.innerHTML = jsonData.k;
+    autoconsoElement.innerHTML = jsonData.Pac;
+    
+    if(isTodayTheActiveDay){
+      var x = new Date().getTime();
+      chartG.series[0].addPoint([x, Math.round(jsonData.Pi )], true, false, true);
+      chartG.series[1].addPoint([x, Math.round(jsonData.Pac)], true, false, true);
+    }
   });
 }
 

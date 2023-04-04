@@ -6,7 +6,7 @@ function tooltipFormatter(points){
   s.push('<span style="color: black;"><b>'+ epochToTime(Number(points[0].x)/1000) + ' :</b><span>');
 
   $.each(points, function(i, point) {
-      s.push('<span style="color: '+ point.series.color +' ;">'+ point.series.name +''+ point.series.color +' : <b>'+ point.y + 'W</b><span>');
+      s.push('<span style="color: '+ point.series.color +' ;">'+ point.series.name +' : <b>'+ point.y + 'W</b><span>');
   });
   return s.join(" <br/>");
 }
