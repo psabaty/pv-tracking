@@ -96,7 +96,7 @@ hr {
 }
 
 /* -------------------------- */
-#buttonPreviousDay, #buttonNextDay{
+#buttonPreviousDay, #buttonNextDay, #buttonAccurate{
     cursor: pointer;
     color: #049faa;
     padding: 0 1em;
