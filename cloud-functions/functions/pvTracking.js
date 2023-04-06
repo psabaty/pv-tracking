@@ -39,21 +39,7 @@ async function aggregateDay(userId, y,m,d) {
   const baseCollectionPath = '/UsersData/'+userId;
   const recordsCollection = admin.firestore().collection(baseCollectionPath+'/pvRecords');
   const destCollection = admin.firestore().collection(baseCollectionPath+'/aggregatedRecords');
-  const daysCollection = admin.firestore().collection(baseCollectionPath+'/dailyReports');
   const minutesIncrement = 5;
-
-  var dayMetrics = {
-    duration: 0,
-    avgPi: 0,
-    avgPac: 0,
-    avgK: 0,
-    Ei: 0,
-    Eac: 0,
-    Ep: 0,
-    Ec: 0,
-    maxPi: 0,
-    maxPac: 0,
-  };
 
   let writeBatch = admin.firestore().batch();
   let batchCount = 0;
@@ -73,8 +59,6 @@ async function aggregateDay(userId, y,m,d) {
     var cumulatedDuration = 0;
     var cumulatedEi = 0;
     var cumulatedEac = 0;
-    var cumulatedEp = 0;
-    var cumulatedEc = 0;
     var avgPi = 0;
     var avgPac = 0;
     var avgK = 0;
@@ -105,8 +89,6 @@ async function aggregateDay(userId, y,m,d) {
           cumulatedDuration += duration;
           cumulatedEi += docData.Ei;
           cumulatedEac += docData.Eac;
-          cumulatedEp += (docData.Ei>0) ? (docData.Ei + docData.Eac) : 0;
-          cumulatedEc += (docData.Ei<0) ? (-1 * docData.Ei) : 0;
           maxPi = Math.max(maxPi, docData.Pi),
           maxPac = Math.max(maxPac, docData.Pac),
           // averages will be later divided by cumulatedDuration
@@ -135,25 +117,10 @@ async function aggregateDay(userId, y,m,d) {
           k: avgK,
           Ei: Number(cumulatedEi.toFixed(2)),
           Eac: Number(cumulatedEac.toFixed(2)),
-          Ep: Number(cumulatedEp.toFixed(2)),
-          Ec: Number(cumulatedEc.toFixed(2)),
           maxPi: maxPi,
           maxPac: maxPac,
       });
       
-      // building progressively day metrics
-      dayMetrics.duration += cumulatedDuration;
-      dayMetrics.Ei += aggregatedData.Ei;
-      dayMetrics.Eac += aggregatedData.Eac;
-      dayMetrics.Ep += aggregatedData.Ep;
-      dayMetrics.Ec += aggregatedData.Ec;
-      dayMetrics.maxPi = Math.max(dayMetrics.maxPi, aggregatedData.maxPi);
-      dayMetrics.maxPac = Math.max(dayMetrics.maxPac, aggregatedData.maxPac);
-      // averages will be later divided by total duration
-      dayMetrics.avgPi += (avgPi * cumulatedDuration);
-      dayMetrics.avgPac += (avgPac * cumulatedDuration);
-      dayMetrics.avgK += (avgK * cumulatedDuration);
-
       // Add to batch
       writeBatch.set(destCollection.doc(String(aggregatedData.timestamp)), aggregatedData);
       batchCount++;
@@ -171,16 +138,6 @@ async function aggregateDay(userId, y,m,d) {
   }while(rangeMinDate.getDate() == d)
   //}while(false)
 
-  // record day metrics
-  if (dayMetrics.duration > 0){
-    dayMetrics.avgPi = Math.round(dayMetrics.avgPi / dayMetrics.duration);
-    dayMetrics.avgPac = Math.round(dayMetrics.avgPac / dayMetrics.duration);
-    dayMetrics.avgK = Math.round(dayMetrics.avgK / dayMetrics.duration);
-  }
-  var dayDocName = `${y}-${m}-${d}`;
-  writeBatch.set(daysCollection.doc(dayDocName), dayMetrics);
-  batchCount += 1;
-
   if (batchCount > 0) {
     console.log('Firebase batch operation completed. Doing final committing of batch operation.');
     await writeBatch.commit();
@@ -188,4 +145,85 @@ async function aggregateDay(userId, y,m,d) {
     console.log('Firebase batch operation completed.');
   }
   return 0;
+}
+
+
+exports.buildDailyReport = functions.region("europe-central2").https.onRequest(async (req, res) => {
+  const query_d = req.query.d;
+  const query_m = req.query.m;
+  const query_y = req.query.y;
+  const userId = 'bFhvGN7eP6afwhsHHencm5rbHmu2';
+  if(!query_d || !query_m || !query_y){
+    throw new Error('Expected y,m,d get parameters');
+  }
+  //return buildDailyReport(userId, query_y, query_m, query_d); 
+  await buildDailyReport(userId, query_y, query_m, query_d); 
+  res.json({result: `Built daily report ${query_y}-${query_m}-${query_d} `});
+});
+
+async function buildDailyReport(userId, y,m,d) {
+  const baseCollectionPath = '/UsersData/'+userId;
+  const aggregatedRecordsCollection = admin.firestore().collection(baseCollectionPath+'/aggregatedRecords');
+  
+  var dayMetrics = {
+    duration: 0,
+    avgPi: 0,
+    avgPac: 0,
+    avgK: 0,
+    Ei: 0,
+    Eac: 0,
+    Ep: 0,
+    Es: 0,
+    maxPi: 0,
+    maxPac: 0,
+    firstRecordTs: 0,
+    lastRecordTs: 0,
+  };
+
+  let writeBatch = admin.firestore().batch();
+  
+  var rangeMinDate = new Date(y, m-1, d, 0, 0, 0);
+  var rangeMaxDate = new Date(y, m-1, d, 24, 0, 0);
+  
+  console.log("Querying from "+rangeMinDate+" within 24 hours");
+  
+  const query = aggregatedRecordsCollection.orderBy("timestamp", "asc")
+    //.where('year', '==', y).where('month', '==', m).where('day', '==', d)
+    .startAt(Math.round(rangeMinDate.getTime()/1000))
+    .endBefore(Math.round(rangeMaxDate.getTime()/1000));
+
+  const documents = await query.get();
+  console.log('found '+documents.size+' records');
+
+  for (var i in documents.docs) {
+    const aggregatedData = documents.docs[i].data();
+    const durationInHours = aggregatedData.duration / 3600;
+
+    dayMetrics.duration += aggregatedData.duration;
+    dayMetrics.Ei += aggregatedData.Ei;
+    dayMetrics.Eac += aggregatedData.Eac;
+    dayMetrics.Ep += Math.max(0, aggregatedData.Ei + aggregatedData.Eac);
+    dayMetrics.Es += (aggregatedData.Pi<0) ? (-1 * aggregatedData.Pi * durationInHours) : 0;
+    dayMetrics.maxPi = Math.max(dayMetrics.maxPi, aggregatedData.maxPi);
+    dayMetrics.maxPac = Math.max(dayMetrics.maxPac, aggregatedData.maxPac);
+    // averages will be later divided by total duration
+    dayMetrics.avgPi += (aggregatedData.Pi * aggregatedData.duration);
+    dayMetrics.avgPac += (aggregatedData.Pac * aggregatedData.duration);
+    dayMetrics.avgK += (aggregatedData.k * aggregatedData.duration);
+    dayMetrics.lastRecordTs = aggregatedData.timestamp;
+    if(dayMetrics.firstRecordTs == 0){
+      dayMetrics.firstRecordTs = aggregatedData.timestamp;
+    }
+  }
+  
+  // averages day metrics final division
+  if (dayMetrics.duration > 0){
+    dayMetrics.avgPi = Math.round(dayMetrics.avgPi / dayMetrics.duration);
+    dayMetrics.avgPac = Math.round(dayMetrics.avgPac / dayMetrics.duration);
+    dayMetrics.avgK = Math.round(dayMetrics.avgK / dayMetrics.duration);
+  }
+  
+  var dayDocName = `${y}-${m}-${d}`;
+  const newDocRef = admin.firestore().doc(baseCollectionPath+'/dailyReports/'+dayDocName);
+  return newDocRef.set(dayMetrics);
 }
